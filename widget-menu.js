@@ -59,11 +59,22 @@
       document.head.appendChild(script);
     });
 
-  const fetchCsv = async (sheetId) => {
-    if (!sheetId) {
+  const buildCsvUrl = (value) => {
+    if (!value) {
       return "";
     }
-    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/pub?output=csv`;
+    const trimmed = value.trim();
+    if (trimmed.startsWith("http")) {
+      return trimmed;
+    }
+    return `https://docs.google.com/spreadsheets/d/${trimmed}/pub?output=csv`;
+  };
+
+  const fetchCsv = async (sheetIdOrUrl) => {
+    const csvUrl = buildCsvUrl(sheetIdOrUrl);
+    if (!csvUrl) {
+      return "";
+    }
     const response = await fetch(csvUrl);
     if (!response.ok) {
       throw new Error(`Respuesta inválida (${response.status})`);
@@ -154,9 +165,38 @@
 
   let itemMap = new Map();
 
-  const updateNodePrice = (node, sizeKey) => {
+  const splitSizeFromId = (normalizedId) => {
+    const parts = normalizedId.split("-");
+    const last = parts[parts.length - 1];
+    if (last === "ind" || last === "fam" || last === "xl") {
+      return {
+        baseId: parts.slice(0, -1).join("-"),
+        sizeKey: last,
+      };
+    }
+    return { baseId: normalizedId, sizeKey: "" };
+  };
+
+  const isUpdatableElement = (node) => {
+    if (!node || node.nodeType !== 1) {
+      return false;
+    }
+    const tag = node.tagName.toLowerCase();
+    if (["button", "input", "select", "textarea"].includes(tag)) {
+      return false;
+    }
+    return node.children.length === 0;
+  };
+
+  const updateNodePrice = (node) => {
+    if (!isUpdatableElement(node)) {
+      return;
+    }
     const rawId = node.getAttribute("data-producto-id");
-    const match = itemMap.get(normalizeId(rawId));
+    const normalizedId = normalizeId(rawId);
+    const exactMatch = itemMap.get(normalizedId);
+    const { baseId, sizeKey } = splitSizeFromId(normalizedId);
+    const match = exactMatch || itemMap.get(baseId);
     if (!match) {
       return;
     }
@@ -165,16 +205,27 @@
     if (!rawPrice) {
       return;
     }
-
-    const priceTarget = node.querySelector(".precio") || node;
-    priceTarget.textContent = formatCLP(rawPrice);
+    node.textContent = formatCLP(rawPrice);
   };
 
-  const refreshAllPrices = (sizeKey) => {
-    const nodes = Array.from(
-      document.querySelectorAll("[data-producto-id]")
-    );
-    nodes.forEach((node) => updateNodePrice(node, sizeKey));
+  const refreshAllPrices = (root = document) => {
+    const nodes = Array.from(root.querySelectorAll("[data-producto-id]"));
+    nodes.forEach((node) => updateNodePrice(node));
+  };
+
+  const findPriceContainer = (startNode) => {
+    let current = startNode;
+    while (current && current !== document.body) {
+      if (
+        current.querySelector(
+          "[data-producto-id].precio-valor, [data-producto-id].precio"
+        )
+      ) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+    return null;
   };
 
   const detectSizeKey = (text) => {
@@ -200,10 +251,13 @@
     if (!sizeKey) {
       return;
     }
-    const card = button.closest("[data-producto-id]");
-    if (card) {
-      updateNodePrice(card, sizeKey);
+    const container = findPriceContainer(button);
+    if (!container) {
+      return;
     }
+    setTimeout(() => {
+      refreshAllPrices(container);
+    }, 0);
   };
 
   const init = async () => {
@@ -220,6 +274,8 @@
       const agregadosMap = buildItemMap(agregadosRows);
       itemMap = mergeMaps(menuMap, agregadosMap);
       refreshAllPrices();
+      window.SistemaMenu = window.SistemaMenu || {};
+      window.SistemaMenu.refresh = () => refreshAllPrices();
       document.addEventListener("click", onSizeClick);
     } catch (_error) {
       // Si falla la carga, no interrumpimos el sitio del cliente.
