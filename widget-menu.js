@@ -27,19 +27,36 @@
   const normalizeId = (value) =>
     normalizeKey(value).replace(/\s+/g, "");
 
-  const formatCLP = (value) => {
+  const parseCLPValue = (value) => {
     if (value === null || value === undefined || value === "") {
-      return "";
+      return null;
     }
-    const digits = value.toString().replace(/[^\d]/g, "");
-    if (!digits) {
-      return value.toString();
+    if (typeof value === "number") {
+      return Number.isNaN(value) ? null : value;
     }
-    const numberValue = Number(digits);
-    if (Number.isNaN(numberValue)) {
-      return value.toString();
+    const raw = value.toString().trim();
+    if (!raw) {
+      return null;
     }
-    return `$${numberValue.toLocaleString("es-CL", {
+    const cleaned = raw.replace(/[^\d.,-]/g, "");
+    if (!cleaned) {
+      return null;
+    }
+    if (cleaned.includes(",")) {
+      const normalized = cleaned.replace(/\./g, "").replace(",", ".");
+      const parsed = Number.parseFloat(normalized);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    const asInt = Number(cleaned.replace(/\./g, ""));
+    return Number.isNaN(asInt) ? null : asInt;
+  };
+
+  const formatCLP = (value) => {
+    const parsed = parseCLPValue(value);
+    if (parsed === null) {
+      return value === null || value === undefined ? "" : value.toString();
+    }
+    return `$${Math.round(parsed).toLocaleString("es-CL", {
       maximumFractionDigits: 0,
     })}`;
   };
